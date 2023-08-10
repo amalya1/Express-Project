@@ -1,10 +1,11 @@
 import {
-  Table, Model, Column, DataType,
+  Table, Model, Column, DataType, HasMany,
 } from 'sequelize-typescript';
+import File from "./file";
 
 @Table({
   timestamps: false,
-  tableName: 'user',
+  tableName: 'User',
 })
 export default class User extends Model {
   @Column({
@@ -17,21 +18,9 @@ export default class User extends Model {
   @Column({
     type: DataType.STRING,
     allowNull: false,
-  })
-  firstName!: string;
-
-  @Column({
-    type: DataType.STRING,
-    allowNull: false,
-  })
-  lastName!: string;
-
-  @Column({
-    type: DataType.STRING,
-    allowNull: false,
     unique: true,
   })
-  email!: string;
+  userName!: string;
 
   @Column({
     type: DataType.STRING,
@@ -43,4 +32,11 @@ export default class User extends Model {
     allowNull: true,
   })
   timeStamp: number;
+
+  @HasMany(() => File, {
+    onDelete: "CASCADE",
+  })
+  File!: File[];
+
 }
+

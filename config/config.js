@@ -3,7 +3,7 @@ config();
 
 module.exports = {
   development: {
-    dialect: 'postgres',
+    dialect: 'mysql',
     database: process.env.DB_NAME,
     host: process.env.DB_HOST,
     port: +process.env.DB_PORT,
@@ -11,7 +11,7 @@ module.exports = {
     password: process.env.DB_PASSWORD,
   },
   production: {
-    dialect: 'postgres',
+    dialect: 'mysql',
     database: process.env.DB_NAME,
     host: process.env.DB_HOST,
     port: +process.env.DB_PORT,
