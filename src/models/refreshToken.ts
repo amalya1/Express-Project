@@ -2,11 +2,12 @@ import {
   Table, Model, Column, DataType,
 } from 'sequelize-typescript';
 
+
 @Table({
   timestamps: false,
-  tableName: 'Token',
+  tableName: 'RefreshToken',
 })
-export default class Token extends Model {
+export default class RefreshToken extends Model {
   @Column({
     type: DataType.INTEGER,
     allowNull: false,
@@ -30,12 +31,6 @@ export default class Token extends Model {
     allowNull: false,
   })
   token!: string;
-
-  @Column({
-    type: DataType.STRING,
-    allowNull: false,
-  })
-  expirationDate!: string;
 
   @Column({
     type: DataType.DATE,

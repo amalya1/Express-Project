@@ -1,12 +1,12 @@
 import controller from "../controllers/fileController";
 import { AppError } from '../common/errors';
-import {Request, Response} from "express";
+import {Response} from "express";
 import fs from "fs";
 import path from "path";
 import {Readable} from "stream";
 import crypto from "crypto";
 import Buffer from "buffer";
-import {RetFile} from "../common/types";
+import {RetFile, RetFiles} from "../common/types";
 
 
 class FileManager {
@@ -19,9 +19,8 @@ class FileManager {
     this.getFile = this.getFile.bind(this);
   }
 
-  async uploadFile(req, res: Response): Promise<Response> {
-        const userId = req.userId;
-        const file = req.file;
+
+  async uploadFile(file: Express.Multer.File, userId: number): Promise<void> {
         const fileBuffer: Buffer = file.buffer;
         const originName = file.originalname;
 
@@ -36,144 +35,90 @@ class FileManager {
 
         await this.createAndWriteStream(fileBuffer, filePath);
 
-        if (fs.existsSync(filePath)) {
-            await controller.createFile(userId, file, filePath);
-            return res.status(201).json({ message: AppError.FILE_CREATED });
-        } else {
-            return res.status(500).json({ message: AppError.FILE_WRITE_ERROR });
-        }
+        if (!fs.existsSync(filePath)) throw { message: AppError.FILE_WRITE_ERROR, statusCode: 400 };
+
+        await controller.createFile(userId, file, filePath);
   }
 
-  async updateFile(req, res: Response): Promise<Response>{
-        const userId = req.userId;
-        const id = req.params.id;
-        const file = req.file;
-        const fileBuffer = file.buffer;
-        const originName = file.originalname;
-        const uploadFolderPath = './upload';
 
-        const randomName = crypto.randomBytes(4).toString('hex');
-        const filePath = path.join(uploadFolderPath, `${randomName}${originName}`);
+  async updateFile(file: Express.Multer.File, fileId: string, userId: number): Promise<void> {
+      const randomName = crypto.randomBytes(4).toString('hex');
+      const filePath = path.join('./upload', `${randomName}${file.originalname}`);
 
-        const result = await controller.updateFile(id, userId, file, filePath);
-        if (result.updateResult[0] > 0) {
-            await this.createAndWriteStream(fileBuffer, filePath);
-            if (fs.existsSync(filePath)) {
-                fs.unlink(result.existingPath.path, (err) => {
-                    if (err) {
-                        res.status(500).json({ message: AppError.ERROR_DELETE_FILE });
-                    } else {
-                        return res.status(201).json({ message: AppError.FILE_UPDATED });
-                    }
-                });
-            } else {
-                return res.status(500).json({ message: AppError.FILE_WRITE_ERROR });
-            }
-        }else {
-            res.status(505).json({ message: AppError.ERROR_UPDATE_FILE });
-        }
-  }
+      const existedFile = await controller.findFileById(fileId);
+      if(!existedFile) throw { message: AppError.FILE_NOT_FOUND, statusCode: 404 };
 
-  async deleteFile(req, res: Response): Promise<Response> {
-      const id = req.params.id;
+      await controller.updateFile(fileId, userId, file, filePath);
+      await this.createAndWriteStream(file.buffer, filePath);
 
-      const result = await controller.destroyFile(id);
-      if (result.deleteResult) {
-          fs.unlink(result.existingPath.path, (err) => {
-              if (err) {
-                  return res.status(500).json({message: AppError.ERROR_DELETE_FILE});
-              } else {
-                  return res.status(201).json({message: AppError.FILE_DELETED});
-              }
+      if (fs.existsSync(filePath)) {
+          fs.unlink(existedFile.path, (err) => {
+              if (err) throw { message: AppError.ERROR_DELETE_FILE, statusCode: 500 };
           });
       } else {
-          return res.status(505).json({message: AppError.ERROR_DELETE_FILE});
+          throw { message: AppError.ERROR_UPDATE_FILE, statusCode: 500 };
       }
   }
 
-  async downloadFile(req: Request, res: Response): Promise<Response> {
-      const id = req.params.id;
-      const file = await controller.findFileById(id);
-      if (!file) {
-          return res.status(404).json({message: AppError.FILE_NOT_FOUND});
-      }
+
+  async deleteFile(fileId: string): Promise<void> {
+      const file = await controller.findFileById(fileId);
+      if(!file) throw { message: AppError.FILE_NOT_FOUND, statusCode: 404 };
+
+      await controller.destroyFile(fileId);
+      fs.unlink(file.path, (err) => {
+          if (err) throw { message: AppError.ERROR_DELETE_FILE, statusCode: 500 };
+      });
+  }
+
+
+  async downloadFile(fileId: string, res: Response): Promise<void> {
+      const file = await controller.findFileById(fileId);
+      if (!file) throw {message: AppError.FILE_NOT_FOUND, statusCode: 404};
 
       if (fs.existsSync(file.path)) {
           const fileStream = fs.createReadStream(file.path);
-
-          const filename = path.basename(file.path);
-          const encodedFilename = encodeURIComponent(filename);
-          res.setHeader('Content-Disposition', `attachment; filename="${encodedFilename}"`);
-
+          res.setHeader('Content-Disposition', `filename="${file.originName}"`);
           fileStream.pipe(res);
+          fileStream.on('end', () => {
+              fileStream.close();
+          });
       } else {
-          return res.status(404).json({message: AppError.FILE_NOT_FOUND});
+          throw {message: AppError.FILE_NOT_FOUND, statusCode: 404};
       }
   }
 
-  async getFiles(req: Request, res: Response): Promise<RetFile[] | void | string> {
-        const result = await controller.getAll(req);
 
-        const filesArray = result.rows.map(file => file.dataValues);
+    async getFiles(input): Promise<RetFiles> {
+        const files = await controller.getAll(input);
+        if (files.rows.length == 0) throw {message: AppError.FILE_NOT_FOUND, statusCode: 404};
+        return files;
+    }
 
-        res.setHeader('Content-Type', 'application/json');
-        res.write('[');
 
-        const promises = filesArray.map(async (entry, index) => {
-            const {
-                path: filePath,
-                originName, mimeType, type, size
-            } = entry;
+    async getFile(fileId: string): Promise<RetFile> {
+      const file = await controller.findFileById(fileId);
+      if(!file) throw { message: AppError.FILE_NOT_FOUND, statusCode: 404 };
+      return file;
+    }
 
-            if (fs.existsSync(filePath)) {
-                const fileContent = await this.readFileAsync(filePath);
-
-                const fileObj = {
-                    originName, mimeType, type, size,
-                    content: fileContent
-                };
-
-                if (index > 0) {
-                    res.write(',');
-                }
-                res.write(JSON.stringify(fileObj));
-            }
-        });
-
-        await Promise.all(promises);
-
-        res.write(']');
-        res.end();
-  }
-
-  async getFile(req, res: Response): Promise<Response> {
-        const id = req.params.id;
-        const { originName, mimeType, type, size } = await controller.findFileInfoById(id);
-        const fileInfo = [
-            originName,
-            mimeType,
-            type,
-            size
-        ]
-        return res.status(200).json(fileInfo );
-  }
 
   async createAndWriteStream(fileBuffer: Buffer , path: string): Promise<void> {
           return new Promise<void>((resolve, reject) => {
 
-              const fileStream = new Readable();
-              fileStream.push(fileBuffer);
-              fileStream.push(null);
+              const readStream = new Readable();
+              readStream.push(fileBuffer);
+              readStream.push(null);
 
               const writeStream = fs.createWriteStream(path);
 
-              fileStream.pipe(writeStream);
+              readStream.pipe(writeStream);
 
-              fileStream.on('data', (chunk) => {
+              readStream.on('data', (chunk) => {
                   writeStream.write(chunk);
               });
 
-              fileStream.on('end', () => {
+              readStream.on('end', () => {
                   writeStream.end();
               });
 
@@ -181,22 +126,10 @@ class FileManager {
                   resolve();
               });
 
-              fileStream.on('error', reject);
+              readStream.on('error', reject);
               writeStream.on('error', reject);
 
           });
-  }
-
-  async readFileAsync(filePath: string): Promise<string> {
-        return new Promise<string>((resolve, reject) => {
-            fs.readFile(filePath, 'utf8', (err, data) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(data);
-                }
-            });
-        });
   }
 }
 

@@ -1,123 +1,54 @@
-import controller from "../controllers/userController";
-import {generateToken} from "../middlewares/jwt";
+import userController from "../controllers/userController";
+import authController from "../controllers/authController";
+import {generateToken} from "../middlewares/auth.middlewares/jwt";
 import {redisClient} from "../redis/redis";
 import { AppError } from '../common/errors';
-import {Request, Response} from "express";
-import moment from 'moment';
-import * as bcrypt from 'bcrypt';
-import jwt, {JwtPayload} from "jsonwebtoken";
-import {jwtToken} from "../../config";
+import {AuthToken, UserData} from "../common/types";
+import * as bcrypt from "bcrypt";
 
 
 class UserManager {
   constructor() {
-    this.addUser = this.addUser.bind(this);
-    this.loginUser = this.loginUser.bind(this);
-    this.refreshToken = this.refreshToken.bind(this);
+    this.createUser = this.createUser.bind(this);
     this.getUser = this.getUser.bind(this);
-    this.revokedToken = this.revokedToken.bind(this);
   }
 
-  async addUser(req: Request, res: Response): Promise<Response> {
-        const userName = req.body.userName.toLowerCase();
 
-        const existUser = await controller.findUserByEmail(userName);
-        if (existUser) {
-          res.status(409).json({ message: AppError.USER_EXIST });
-        }
+  async createUser(input: UserData): Promise<AuthToken>{
+    const userName = input.userName;
 
-        const user = await controller.createUser({...req.body, userName});
-        if(user) {
-            const auth = {
-                id: user.id,
-                userName: user.userName,
-            };
+    const existUser = await userController.findUserByUserName(userName);
+    if (existUser) throw { message: AppError.USER_EXIST, statusCode: 409 };
 
-            const [accessToken, refreshToken]: [string, string] = await generateToken(auth);
-            await redisClient.set(accessToken, JSON.stringify(auth));
+    const hashPassword = await this.hashPassword(input.password);
+    const createdUser = await userController.createUser({userName, password: hashPassword});
 
-            const token = {
-                jwtAccess: accessToken,
-                jwtRefresh: refreshToken,
-            };
+    const user = { id: createdUser.id, userName: createdUser.userName };
 
-            return res.status(200).json({ message: AppError.USER_CREATED, ...auth, token });
-        }
-        return res.status(201).json({ message: AppError.USER_CREATION_FAILED });
+    const { accessToken, refreshToken } = await generateToken(user);
+
+    await redisClient.set(accessToken, JSON.stringify(user));
+
+    await authController.createRefreshToken(user.id, refreshToken);
+
+    return {
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        user: user,
+    };
   }
 
-  async loginUser(req: Request, res: Response): Promise<Response>{
-        const userName = req.body.userName;
-        const existUser = await controller.findUserByEmail(userName);
 
-        if (!existUser) {
-          res.status(400).json({ message: AppError.USER_NOT_EXIST });
-        }
-        const validatePassword = await bcrypt.compare(
-            req.body.password,
-            existUser.password,
-        );
-        if (!validatePassword) {
-          res.status(400).json({ message: AppError.WRONG_DATA });
-        }
-        await controller.updateUserLogTime(existUser.id, moment().unix());
-
-        const auth = {
-          id: existUser.id,
-          userName: existUser.userName,
-          isRevoked: false,
-        };
-        const [accessToken, refreshToken]: [string, string] = await generateToken(auth);
-        await redisClient.set(accessToken, JSON.stringify(auth));
-        const token = {
-          jwtAccess: accessToken,
-          jwtRefresh: refreshToken,
-        };
-
-        return res.status(200).json({ ...auth, token });
+  async getUser(userId: string): Promise<string> {
+      const user = await userController.findUserById(userId);
+      if (!user) throw { message: AppError.USER_NOT_FOUND, statusCode: 404 };
+      return user.userName;
   }
 
-  async refreshToken(req: Request, res: Response): Promise<Response> {
-      const  refreshToken= req.body.token;
-      const decodedToken = jwt.verify(refreshToken, jwtToken.secretRefreshToken) as JwtPayload;
-      const id = decodedToken.user.id
-      const userName = decodedToken.user.userName
 
-      const auth = {
-          id,
-          userName,
-          isRevoked: false,
-      };
-
-      const currentTimestamp = Math.floor(Date.now() / 1000);
-      const token = await controller.findRefreshToken(id, refreshToken);
-      if (currentTimestamp < parseInt(token.expirationDate)) {
-           const [ accessToken, refreshToken ] = await generateToken(auth);
-           return res.status(200).json({ accessToken, refreshToken });
-      }
-      await controller.deleteToken(id);
-      return res.status(201).json({ message: 'token expired' });
-  }
-
-  async getUser(req, res: Response): Promise<Response> {
-      const id = req.userId;
-      const { userName } = await controller.findUserById(id);
-      return res.status(200).json(userName);
-  }
-
-   async revokedToken(req, res: Response){
-        const id = req.userId;
-
-        const auth = { id, isRevoked: true };
-        const [accessToken] = await generateToken(auth);
-
-        await controller.deleteToken(id);
-
-        req.session.destroy();
-        res.status(200).json(accessToken);
-        // res.clearCookie('authCookie')
-        // res.redirect('/signIn')
-   }
+   async hashPassword(password: string): Promise<string> {
+        return bcrypt.hash(password, 10);
+    }
 }
 
 export default new UserManager();

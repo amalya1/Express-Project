@@ -2,19 +2,18 @@ import { Sequelize } from 'sequelize-typescript';
 import dotenv from 'dotenv';
 import User from "../src/models/user";
 import File from "../src/models/file";
-import Token from "../src/models/token";
+import RefreshToken from "../src/models/refreshToken";
 
 dotenv.config();
 
 const connection = new Sequelize({
-    dialect: 'mysql',
-    port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306,
+    dialect: 'postgres',
+    port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 5432,
     username: process.env.DB_USERNAME,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_NAME,
     host: process.env.DB_HOST,
-    operationsAliases: false,
-    models: [User, File, Token],
+    models: [User, File, RefreshToken],
 });
 
  const jwtToken = {
