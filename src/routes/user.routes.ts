@@ -6,6 +6,8 @@ import {createUserSchema} from "../middlewares/validate.middlewares/validation";
 
 const router = express.Router();
 
+
+
 router.post('/signUp', validateData(createUserSchema), async (req: express.Request, res: express.Response) => {
     try {
         const result = await userManager.createUser(req.body);
@@ -14,6 +16,7 @@ router.post('/signUp', validateData(createUserSchema), async (req: express.Reque
         res.json(error);
     }
 });
+
 
 router.get('/:userId', verifyJWT, async (req: express.Request, res: express.Response) => {
     const { userId } = req.params;

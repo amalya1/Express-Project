@@ -25,7 +25,7 @@ class UserManager {
 
     const user = { id: createdUser.id, userName: createdUser.userName };
 
-    const { accessToken, refreshToken } = await generateToken(user);
+    const { accessToken, refreshToken } = generateToken(user);
 
     await redisClient.set(accessToken, JSON.stringify(user));
 
